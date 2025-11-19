@@ -3,7 +3,7 @@ TARGET = wPFAW3D
 ## for intel oneAPI
 FC = mpiifx
 #FFLAGS = -O0 -check bounds -traceback -fpp
-FFLAGS = -O2 -fpp -g
+FFLAGS = -O2 -fpp -g -O0
 IFLAGS = -I $(HOME)/local/include
 LFLAGS = -L $(HOME)/local/lib
 LIBS = -lpetsc

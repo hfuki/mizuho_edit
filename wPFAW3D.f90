@@ -1195,6 +1195,7 @@ contains
    !>
    !! @brief calculate time derivative of phase.
    subroutine calcPhaseDeriv( taumin )
+      use, intrinsic :: ieee_arithmetic  
       !--- Dummy arguments.
       real(8), intent(out) :: taumin
       !--- Local variables.
@@ -1213,12 +1214,15 @@ contains
       real(8) :: w, w0, norm, theta, theta0, dtheta, phi_, phi_0, dphi_
 
       real(8) :: eps, c, s, c2, s2, c4, s4, c4phi, s4phi
+      real(8) :: maxdphi
 
       phi_0 = 0
       theta0 = 0
       w0 = 2.0d0 * param%dx
 
       taumin = 1.0d6 ! set a large value.
+
+      maxdphi = 2.0d0 / (2.0d0 * param%dx)
 
       do iz=1, param%nz
          do iy=1, param%ny
@@ -1256,21 +1260,11 @@ contains
                   cycle
                end if
 
-
-
                               ! --- 一階偏微分 ---
-               phix = (phase(ix+1, iy, iz) - phase(ix-1, iy, iz)) / (2.0d0 * param%dx)
-               phiy = (phase(ix, iy+1, iz) - phase(ix, iy-1, iz)) / (2.0d0 * param%dx)
-               phiz = (phase(ix, iy, iz+1) - phase(ix, iy, iz-1)) / (2.0d0 * param%dx)
+               phix = gpf(1)
+               phiy = gpf(2)
+               phiz = gpf(3)
                
-               norm = sqrt(phix**2 + phiy**2 + phiz**2)
-
-               theta = atan(phiy / (phix + 1.0d-20))
-               phi_ = acos(phiz / (norm + 1.0d-20))
-
-               dtheta = theta - theta0
-               dphi_ = phi_ - phi_0
-
                               ! --- 二階偏微分 ---
                phixx = (phase(ix+1, iy, iz) - 2.0d0 * phase(ix, iy, iz) + phase(ix-1, iy, iz)) / (param%dx**2)
                phiyy = (phase(ix, iy+1, iz) - 2.0d0 * phase(ix, iy, iz) + phase(ix, iy-1, iz)) / (param%dx**2)
@@ -1285,6 +1279,20 @@ contains
                ! ∂^2φ/∂z∂x  (= ∂^2φ/∂x∂z)
                phizx = (  phase(ix+1, iy, iz+1) - phase(ix-1, iy, iz+1)  &
                      - phase(ix+1, iy, iz-1) + phase(ix-1, iy, iz-1) ) / (4.0d0 * param%dx**2)
+
+               if (phix == 0 .and. phiy == 0 .and. phiz == 0 .and. phixx == 0 .and. phiyy == 0 .and. phizz == 0 .and. phixy == 0 .and. phiyz == 0 .and. phizx == 0) then
+                  dphasedt(ix,iy,iz) = 0
+                  cycle
+               endif
+               
+
+               theta = atan(phiy / (phix + 1.0d-20))
+               phi_ = acos(phiz / (dpf + 1.0d-20))
+
+               dtheta = theta - theta0
+               dphi_ = phi_ - phi_0
+
+
 
                ! 前計算（任意：可読性＆計算削減）
                eps   = param%epsilon
@@ -1319,31 +1327,42 @@ contains
                !  = w0 * ( -16.0d0*eps * sin(dtheta)**3 * cos(dtheta) * sin(4*dphi_) )
 
 
-               dthetadx = ( phixy*phix - phiy*phixx ) / (phix**2 + phiy**2)
-               dthetady = ( phiyy*phix - phiy*phixy ) / (phix**2 + phiy**2)
-               dthetadz = ( phiyz*phix - phiy*phizx ) / (phix**2 + phiy**2)
-
+               dthetadx = 0.0d0
+               dthetady = 0.0d0
+               dthetadz = 0.0d0
+               if (phix > maxdphi .or. phiy > maxdphi) then
+                  dthetadx = ( phixy*phix - phiy*phixx ) / (phix**2 + phiy**2 + 1.0d-20)
+                  dthetady = ( phiyy*phix - phiy*phixy ) / (phix**2 + phiy**2 + 1.0d-20)
+                  dthetadz = ( phiyz*phix - phiy*phizx ) / (phix**2 + phiy**2 + 1.0d-20)
+               endif
                
-               dphi_dx = ( phiz * (phix * phixx + phiy * phixy) - (phix**2 + phiy**2) * phizx ) / &
-                        ( (phix**2 + phiy**2 + phiz**2) * sqrt(phix**2 + phiy**2) )
+               dphi_dx = 0
+               dphi_dy = 0
+               dphi_dz = 0
+               if (phix > maxdphi .or. phiy > maxdphi .or. phiz > maxdphi) then
+                  dphi_dx = ( phiz * (phix * phixx + phiy * phixy) - (phix**2 + phiy**2) * phizx ) / &
+                           ( (phix**2 + phiy**2 + phiz**2) * sqrt(phix**2 + phiy**2) + 1.0d-20)
 
-               dphi_dy = ( phiz * (phix * phixy + phiy * phiyy) - (phix**2 + phiy**2) * phiyz ) / &
-                        ( (phix**2 + phiy**2 + phiz**2) * sqrt(phix**2 + phiy**2) )
+                  dphi_dy = ( phiz * (phix * phixy + phiy * phiyy) - (phix**2 + phiy**2) * phiyz ) / &
+                           ( (phix**2 + phiy**2 + phiz**2) * sqrt(phix**2 + phiy**2) + 1.0d-20)
 
-               dphi_dz = ( phiz * (phix * phizx + phiy * phiyz) - (phix**2 + phiy**2) * phizz ) / &
-                        ( (phix**2 + phiy**2 + phiz**2) * sqrt(phix**2 + phiy**2) )
+                  dphi_dz = ( phiz * (phix * phizx + phiy * phiyz) - (phix**2 + phiy**2) * phizz ) / &
+                           ( (phix**2 + phiy**2 + phiz**2) * sqrt(phix**2 + phiy**2) + 1.0d-20)
+               endif
 
-               
-
-               dthetaddpdx = - phiy * ( (phix**2 + phiy**2 + phiz**2) / ((phix**2 + phiy**2) * norm) )
-               dthetaddpdy =   phix * ( (phix**2 + phiy**2 + phiz**2) / ((phix**2 + phiy**2) * norm) )
+               dthetaddpdx = 0.0d0
+               dthetaddpdy = 0.0d0
+               if (phix > maxdphi .or. phiy > maxdphi) then
+                  dthetaddpdx = - phiy * (phix**2 + phiy**2 + phiz**2) / ((phix**2 + phiy**2) + 1.0d-20)
+                  dthetaddpdy =   phix * (phix**2 + phiy**2 + phiz**2) / ((phix**2 + phiy**2) + 1.0d-20)
+               endif
                dthetaddpdz = 0.0d0
 
                ! --- 各方向の ∂φ/∂(∂φ/∂x), ∂φ/∂(∂φ/∂y), ∂φ/∂(∂φ/∂z) の導関数 ---
 
-               dphi_ddpdx =   phix * phiz / (sqrt(phix**2 + phiy**2) * norm)
-               dphi_ddpdy =   phiy * phiz / (sqrt(phix**2 + phiy**2) * norm)
-               dphi_ddpdz = - sqrt(phix**2 + phiy**2) / norm
+               dphi_ddpdx =   phix * phiz / (sqrt(phix**2 + phiy**2) * dpf + 1.0d-20)
+               dphi_ddpdy =   phiy * phiz / (sqrt(phix**2 + phiy**2) * dpf + 1.0d-20)
+               dphi_ddpdz = - sqrt(phix**2 + phiy**2) / (dpf + 1.0d-20)
 
                dwdx = dwdtheta * dthetadx + dwdphi_ * dphi_dx
                dwdy = dwdtheta * dthetady + dwdphi_ * dphi_dy
@@ -1365,6 +1384,7 @@ contains
                
                ! ---- 1) 2W (∇W · ∇φ)
                f2 = 2.0d0 * w * ( dwdx * phix + dwdy * phiy + dwdz * phiz )
+               ! f2 = 0
 
                ! ---- 2) W^2 ∇^2φ
                f3 = w**2 * lap_phase(ix, iy, iz)
@@ -1372,23 +1392,46 @@ contains
                ! ---- 3) 角依存ブロック（x偏微分の鎖則部分）
                !   ∂W/∂x { (∂W/∂θ) * ∂θ/∂(∂φ/∂x) * |∇φ|^2 + (∂W/∂ϕ) * ∂ϕ/∂(∂φ/∂x) * |∇φ|^2 }
                ! + W { ∂^2W/∂θ∂x * ∂θ/∂(∂φ/∂x) * |∇φ|^2 + ∂^2W/∂ϕ∂x * ∂ϕ/∂(∂φ/∂x) * |∇φ|^2 }
-               f4 = dwdx * ( dwdtheta * dthetaddpdx * (norm**2) + dwdphi_ * dphi_ddpdx * (norm**2) )  &
-                  + w    * ( ddwdthetax * dthetaddpdx * (norm**2) + ddwdphi_x * dphi_ddpdx * (norm**2) )
+               f4 = dwdx * ( dwdtheta * dthetaddpdx * (dpf**2) + dwdphi_ * dphi_ddpdx * (dpf**2) )  &
+                  + w    * ( ddwdthetax * dthetaddpdx * (dpf**2) + ddwdphi_x * dphi_ddpdx * (dpf**2) )
+               ! f4 = 0
 
                ! ---- 4) 角依存ブロック（y偏微分の鎖則部分）
                !   ∂W/∂y {... x と同様 ...}
-               f5 = dwdy * ( dwdtheta * dthetaddpdy * (norm**2) + dwdphi_ * dphi_ddpdy * (norm**2) )  &
-                  + w    * ( ddwdthetay * dthetaddpdy * (norm**2) + ddwdphi_y * dphi_ddpdy * (norm**2) )
+               f5 = dwdy * ( dwdtheta * dthetaddpdy * (dpf**2) + dwdphi_ * dphi_ddpdy * (dpf**2) )  &
+                  + w    * ( ddwdthetay * dthetaddpdy * (dpf**2) + ddwdphi_y * dphi_ddpdy * (dpf**2) )
+               ! f5 = 0
 
                ! ---- 5) 角依存ブロック（z偏微分の鎖則部分）
                !   ∂W/∂z {... x と同様 ...}
-               f6 = dwdz * ( dwdtheta * dthetaddpdz * (norm**2) + dwdphi_ * dphi_ddpdz * (norm**2) )  &
-                  + w    * ( ddwdthetaz * dthetaddpdz * (norm**2) + ddwdphi_z * dphi_ddpdz * (norm**2) )
+               f6 = dwdz * ( dwdtheta * dthetaddpdz * (dpf**2) + dwdphi_ * dphi_ddpdz * (dpf**2) )  &
+                  + w    * ( ddwdthetaz * dthetaddpdz * (dpf**2) + ddwdphi_z * dphi_ddpdz * (dpf**2) )
+               ! f6 = 0
 
-
-               f7    = -param%epsilon**2* div_normal(ix,iy,iz) * dpf
+               !f7    = -param%epsilon**2* div_normal(ix,iy,iz) * dpf
+               f7 = 0
 
                dphasedt(ix,iy,iz) = (f1+f2+f3+f4+f5+f6+f7)/tau
+
+                  ! if (velocity_s<0.0d0) then
+                  !    write(*,*)
+                  ! endif
+
+
+               ! ! if (ieee_is_nan(dphasedt(ix,iy,iz))) then
+               ! !    write(*,*)
+               ! ! endif
+
+                  if (phase(ix,iy,iz) > 1 .or. phase(ix,iy,iz) < -1) then
+                     write(*,*)"aa"
+                  endif
+               
+
+               ! if (ix == 5 .and. iy == 4 .and. iz == 4) then
+               !    write(*,*)
+               ! endif
+
+
             end do
          end do
       end do
@@ -2128,6 +2171,8 @@ end module wPFAW3D
 !! @brief main routine of this program.
 program main
    use wPFAW3D
+   use, intrinsic :: ieee_arithmetic
+
    implicit none
 
    !---  Variables --------------------------------------------------------
@@ -2185,12 +2230,50 @@ program main
       end if
       time  = time+param%dtime ! update time.
 
+
+      if (itime == 6) then
+         open(5, file='phasecheck_ihou.out')
+         write(5,*)"itime=",itime
+         do iz_g = 1, 10
+            write(5, *) iz_g
+            do iy_g = 1, 10
+               ! 1行に ix_g = 5〜14 の値を並べる
+               write(5, '(11e12.4)') ( real(phase(ix_g, iy_g, iz_g)), ix_g = 1, 10 )
+            end do
+            write(5,*)
+         enddo
+      endif
+
+
       !--- Calculate time derivatives of fields.
       call calcPermeability
       call solvePressure
       call calcVelocity
       call calcPhaseDeriv( taumin )
       call calcConcentDeriv
+
+
+
+
+      !    write(filename,"('field.midout.',i2.2)") mpi_rank
+      !  open( unit=42, file=filename )   
+
+      ! do ix_g=1, param%nx_g
+      !    iy_g=ix_g
+      !    iz_g=ix_g
+      !    if( param%sx+1<=ix_g .and. ix_g<=param%sx+param%nx .and. &
+      !       param%sy+1<=iy_g .and. iy_g<=param%sy+param%ny .and. &
+      !       param%sz+1<=iz_g .and. iz_g<=param%sz+param%nz ) then
+      !       write(42,"(i4,4e16.8)") ix_g, &
+      !          real(pressure( ix_g-param%sx,iy_g-param%sy,iz_g-param%sz)), &
+      !          real(permeab(0,ix_g-param%sx,iy_g-param%sy,iz_g-param%sz)), &
+      !          real(phase(    ix_g-param%sx,iy_g-param%sy,iz_g-param%sz)), &
+      !          real(concent(  ix_g-param%sx,iy_g-param%sy,iz_g-param%sz))
+      !    end if
+      ! end do
+      ! write(42, *)
+
+
 
       !--- Evolve fields.
       call evolvePhase
@@ -2207,6 +2290,7 @@ program main
          call saveResult( filename_res, time )
          time_res = time_res+param%dtime_res ! update time to output at the next time.
       end if
+      ! write(*,*)"itime = ",itime
    end do
 
    !--- For debug
